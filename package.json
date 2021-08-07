@@ -8,5 +8,10 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "moment": "^2.29.1",
+    "node-cron": "^3.0.0",
+    "puppeteer": "^1.4.0"
+  }
 }
