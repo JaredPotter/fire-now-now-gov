@@ -1,39 +1,59 @@
-const { spawn, spawnSync } = require('child_process');
-const cron = require('node-cron');
-const puppeteer = require('puppeteer');
-const moment = require('moment');
+const spawn = require("cross-spawn");
+const spawnSync = spawn.sync;
+const cron = require("node-cron");
+const puppeteer = require("puppeteer");
+const moment = require("moment");
+const axios = require("axios");
+const fs = require('fs-extra')
 
-let chromeLauncher = '';
+let chromeLauncher = "";
 let chromeLauncherFlags = [];
 
+// FULL LIST OF chromium FLAGS
+// https://peter.sh/experiments/chromium-command-line-switches/#load-extension
+
 async function getLatestScreenshot() {
-  if (process.platform === 'win32') {
-    console.log('Running on Windows');
-    chromeLauncher = 'start';
-    chromeLauncherFlags = ['chrome.exe', '–remote-debugging-port=9222'];
-  } else if (process.platform === 'darwin') {
-    console.log('Running on Mac');
-    await spawnSync('killall', [`Google Chrome`]);
+  let wsChromeEndpointUrl = "";
+
+  if (process.platform === "win32") {
+    console.log("Running on Windows");
+
+    spawnSync("powershell", ["kill", "-n", "chrome"]);
+    await sleep(1000);
+
+    chromeLauncher = "start";
+    chromeLauncherFlags = [
+      "chrome.exe",
+      "--remote-debugging-port=9222",
+      "--no-first-run",
+      "--no-default-browser-check",
+    ];
+
+    wsChromeEndpointUrl = await startChromeProcess(
+      chromeLauncher,
+      chromeLauncherFlags
+    );
+  } else if (process.platform === "darwin") {
+    console.log("Running on Mac");
+    spawnSync("killall", [`Google Chrome`]);
     chromeLauncher = `/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome`;
     chromeLauncherFlags = [
-      '--remote-debugging-port=9222',
-      '--no-first-run',
-      '--no-default-browser-check',
+      "--remote-debugging-port=9222",
+      "--no-first-run",
+      "--no-default-browser-check",
       `--user-data-dir=$(mktemp -d -t "chrome-remote_data_dir"`,
     ];
+    wsChromeEndpointUrl = await startChromeProcess(
+      chromeLauncher,
+      chromeLauncherFlags
+    );
   }
 
-  if (!chromeLauncher || chromeLauncherFlags.length === 0) {
-    console.log('platform not supported!');
+  if (!wsChromeEndpointUrl) {
+    console.log("Failed to load websocket URL. Exiting now!");
     return;
   }
 
-  const webSocketUrl = await startChromeProcess(
-    chromeLauncher,
-    chromeLauncherFlags
-  );
-
-  const wsChromeEndpointUrl = webSocketUrl;
   const browser = await puppeteer.connect({
     browserWSEndpoint: wsChromeEndpointUrl,
     defaultViewport: {
@@ -57,7 +77,7 @@ async function getLatestScreenshot() {
             speed: null,
           },
         });
-      }, 1000);
+      }, 1);
     };
   });
 
@@ -66,33 +86,37 @@ async function getLatestScreenshot() {
     height: 2000,
   });
 
-  await page.goto('https://fire.airnow.gov/', {
-    waitUntil: 'networkidle0',
+  await page.goto("https://fire.airnow.gov/", {
+    waitUntil: "networkidle0",
   });
 
-  console.log('Time to zoom out');
-  const zoomOutButtonElement = await page.$('.leaflet-control-zoom-out');
+  console.log("Time to zoom out");
+  const zoomOutButtonElement = await page.$(".leaflet-control-zoom-out");
   await zoomOutButtonElement.click();
-  await sleep(1000);
+  await sleep(1500);
   await zoomOutButtonElement.click();
-  await sleep(1000);
+  await sleep(1500);
   await zoomOutButtonElement.click();
-  await sleep(1000);
-  await page.keyboard.press('ArrowLeft');
-  await sleep(1000);
-  await page.keyboard.press('ArrowLeft');
-  await sleep(1000);
-  await page.keyboard.press('ArrowLeft');
+  await sleep(1500);
+  await page.keyboard.press("ArrowLeft");
+  await sleep(1500);
+  await page.keyboard.press("ArrowLeft");
+  await sleep(1500);
+  await page.keyboard.press("ArrowLeft");
   await sleep(5000);
 
-  console.log('Time Screenshot!');
-  const bodyElement = await page.$('body');
+  console.log("Time Screenshot!");
+  const bodyElement = await page.$("body");
   const bodyBoundingBox = await bodyElement.boundingBox();
 
   const now = moment().utc().unix();
+  fs.ensureDirSync('./screenshots');
+  const outputFileName = `./screenshots/${now}.png`;
+
+  console.log('Now saving: ' + outputFileName);
 
   await bodyElement.screenshot({
-    path: `./screenshots/${now}.png`,
+    path: outputFileName,
     clip: {
       x: bodyBoundingBox.x,
       y: bodyBoundingBox.y,
@@ -100,33 +124,40 @@ async function getLatestScreenshot() {
       height: Math.min(bodyBoundingBox.height, page.viewport().height),
     },
   });
+
+  console.log('ALL DONE!');
+  
+  if (process.platform === "win32") {
+    spawnSync("powershell", ["kill", "-n", "chrome"]);
+  } else if(process.platform === "darwin") {
+    spawnSync("killall", [`Google Chrome`]);
+  }
+  
+  return;
 }
 
 async function startChromeProcess(chromeLauncher, chromeLauncherFlags) {
-  console.log(`Running \n${chromeLauncher} ${chromeLauncherFlags.join(' ')}`);
+  const chromeStartCommand = `${chromeLauncher} ${chromeLauncherFlags.join(" ")}`;
+  
+  // Starts Chrome
+  try {
+    console.log(`Running \n${chromeStartCommand}`);
+    spawnSync(chromeStartCommand, { stdio: 'inherit' });
+  } catch (error) {
+    // do nothing. 
+  }
 
-  let chromeProcess = spawn(chromeLauncher, chromeLauncherFlags);
-
-  return new Promise((resolve) => {
-    chromeProcess.stderr.on('data', (data) => {
-      const outputString = data.toString().trim();
-      console.log(outputString);
-
-      if (
-        outputString.includes(
-          'DevTools listening on ws://127.0.0.1:9222/devtools/browser/'
-        )
-      ) {
-        console.log(outputString);
-        const stringSplit = outputString.split(' ');
-        const webSocketUrl = stringSplit[3];
-
-        console.log('webSocketUrl: ' + webSocketUrl);
-
-        resolve(webSocketUrl);
-      }
-    });
-  });
+  await sleep(1000);
+  
+  try {
+    console.log("Fetching webSocket URL...");
+    const response = await axios.get("http://localhost:9222/json/version");
+    const data = response.data;
+    return data.webSocketDebuggerUrl;
+  } catch (error) {
+    console.log('Request failed. Exiting now.');
+    return;
+  }
 }
 
 async function sleep(ms) {
@@ -135,7 +166,10 @@ async function sleep(ms) {
   });
 }
 
-cron.schedule('0,15,30,45 * * * *', () => {
-  console.log('TIME TO RUN');
+// DEV ONLY
+// getLatestScreenshot();
+
+cron.schedule("0,15,30,45 * * * *", () => {
+  console.log("TIME TO RUN");
   getLatestScreenshot();
 });
