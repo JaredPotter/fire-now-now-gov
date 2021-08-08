@@ -174,7 +174,7 @@ async function sleep(ms) {
 }
 
 // DEV ONLY
-getLatestScreenshot();
+// getLatestScreenshot();
 
 cron.schedule('0,15,30,45 * * * *', () => {
   console.log('TIME TO RUN');
