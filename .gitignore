@@ -3,3 +3,5 @@ node_modules
 $(mktemp -d -t "chrome-remote_data_dir"
 
 screenshots
+
+noaa-hrrr-smoke-screenshots
